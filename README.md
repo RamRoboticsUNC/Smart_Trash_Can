@@ -41,7 +41,10 @@ if torch.cuda.is_available():
     model.to('cuda')
 else: 
     print("gpu not avilalable")
----------------------
+
+
+    
+
 @app.post("/")
 async def root(weight: str, file: UploadFile = File(...)):
     print("Actually start testing the model")
@@ -50,7 +53,9 @@ async def root(weight: str, file: UploadFile = File(...)):
         output = model(input_batch)
         print("you reached the goal")
         print(output)
-------------------
+
+
+        
 
 if data[idx] in recyclable:
     recycle = 1
