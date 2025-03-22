@@ -61,6 +61,7 @@ else:
 ---
 
 Ezra:
+
 Github link: https://github.com/manuelamc14/waste-classification-model
 
 Follow instructions in this repo's README to install, including changing the
