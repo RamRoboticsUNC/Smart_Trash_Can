@@ -117,8 +117,7 @@ def getPrediction(filename):
      return values[0], values[1], values[2]
 
 # print(getPrediction('img1.jpeg'))
-*****************************************************************
+```
 
 One limitation is that this model only can tell whether something is recyclable
 or organic, it has no feature to distinguish trash.
-```
