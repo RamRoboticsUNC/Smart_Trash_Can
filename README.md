@@ -58,6 +58,7 @@ if data[idx] in recyclable:
 else:
     print(f"The object {data[idx]} is not recyclable.")
 
+---
 
 Ezra:
 Github link: https://github.com/manuelamc14/waste-classification-model
