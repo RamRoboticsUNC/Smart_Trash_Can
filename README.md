@@ -123,3 +123,234 @@ def getPrediction(filename):
 
 One limitation is that this model only can tell whether something is recyclable
 or organic, it has no feature to distinguish trash.
+
+
+```
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Wire.h>
+#include <L298NX2.h> //#include <L298N.h>
+#include <IRremote.hpp>
+
+int yled = 2;
+int gled = 3;
+int sy = 4;
+int sg = 5;
+
+int enA = 9;
+int in1 = 8;
+int in2 = 7;
+
+//int enB = 11;
+//int in3 = 10;
+//int in4 = 12;
+int R_SIG = 10;
+int T_SIG = 11;
+// Buffer for storing incoming serial data
+String inputString = "";
+boolean stringComplete = false;
+
+#define IR_RECEIVE_PIN 6
+//L298NX2 MOTORS(enA, in1, in2, enB, in3, in4);
+L298N MOTORS(enA, in1, in2);
+// Operation mode
+int MODE = 3;        // Start in none mode by default
+int SPEED = 100;
+int MOVE_TIME = 20;
+void setup() {
+  // put your setup code here, to run once:
+  pinMode(yled, OUTPUT);
+  pinMode(sy, INPUT);
+  pinMode(gled, OUTPUT);
+  pinMode(sg, INPUT);
+  pinMode(R_SIG, INPUT);
+  pinMode(T_SIG, INPUT);
+  IrReceiver.begin(IR_RECEIVE_PIN, ENABLE_LED_FEEDBACK);
+  Serial.begin(9600);
+  while (!Serial) {
+    ; // wait for serial port to connect
+  }
+
+    // Reserve 200 bytes for the inputString
+  inputString.reserve(200);
+}
+void loop() {
+  // Process completed commands
+  if (stringComplete) {
+    // Remove newline and carriage return characters
+    inputString.trim();
+    
+    // Process the command
+    processCommand(inputString);
+    
+    // Clear the string for new input
+    inputString = "";
+    stringComplete = false;
+  }
+  
+  // Check for incoming serial data
+  while (Serial.available()) {
+    // Get the new byte
+    char inChar = (char)Serial.read();
+    
+    // Add it to the inputString
+    inputString += inChar; 
+    
+    // If the incoming character is a newline, set a flag
+    // so the main loop can process the complete string
+    if (inChar == '\n') {
+      stringComplete = true;
+    }
+  }
+}
+
+// Function to process received commands
+void processCommand(String command) {
+  // Echo back the received command
+  Serial.print("Received command: ");
+  Serial.println(command);
+  
+  // Process specific commands
+  if (command.equals("LED_ON")) {
+    Serial.println("LED turned ON");
+  } 
+  else if (command.equals("LED_OFF")) {
+    Serial.println("LED turned OFF");
+  }
+  else if (command.equals("PING")) {
+    Serial.println("PONG");
+  }
+  else {
+    // For any other command, just acknowledge receipt
+    Serial.println("Command not recognized. Try LED_ON, LED_OFF, or PING");
+  }
+  
+  // Print a separator for readability
+  Serial.println("-----");
+}
+
+void loop2() {
+  // put your main code here, to run repeatedly:
+  int yval = digitalRead(sy);
+  int gval = digitalRead(sg);
+  int rval = digitalRead(R_SIG);
+  int tval = digitalRead(T_SIG);
+  int newMode = decideMode(yval, gval, 0);
+  if (newMode != MODE) {
+    Serial.print("Change in mode to ");
+    Serial.println(newMode);
+    MODE = newMode;
+    return;
+  }
+  if (MODE == 1){
+    int modelOutput = inderence(rval, tval, 0);
+    if (modelOutput == 1) {
+      Serial.println("PI: FULL RECYCLE for 2 seconds");
+      if (MODE == 2) {
+        MOTORS.setSpeed(SPEED); // full speed
+        MOTORS.forward();
+        delay(MOVE_TIME);
+        MOTORS.stop();
+      }
+    }
+    else if (modelOutput == 2) {
+      Serial.println("PI: FULL TRASH for 2 seconds");
+      if (MODE == 2) {
+        MOTORS.setSpeed(SPEED); // full speed
+        MOTORS.backward();
+        delay(MOVE_TIME);
+        MOTORS.stop();
+      }
+    } else if (modelOutput == 3){
+      Serial.println("NO OUTPUT PI");
+    } else if (modelOutput == 4){
+      Serial.println("MODEL ERROR");
+    }
+    return;
+
+  }
+
+  if (IrReceiver.decode()) {
+    uint8_t cmd = IrReceiver.decodedIRData.command;
+    Serial.print("IR code received: ");
+    Serial.println(cmd, HEX);
+
+    if (cmd == 0x43) {
+      Serial.println("IR Command: FULL FORWARD for 2 seconds");
+      if (MODE == 2) {
+        MOTORS.setSpeed(SPEED); // full speed
+        MOTORS.forward();
+        delay(MOVE_TIME);
+        MOTORS.stop();
+      }
+    }
+    else if (cmd == 0x44) {
+      Serial.println("IR Command: FULL REVERSE for 2 seconds");
+      if (MODE == 2) {
+        MOTORS.setSpeed(SPEED); // full speed
+        MOTORS.backward();
+        delay(MOVE_TIME);
+        MOTORS.stop();
+      }
+    }
+
+    IrReceiver.resume();  // ready for next signal
+  }
+}
+
+// 1 for recycle, 2 for trash, 3 for none, 4 for error
+int inderence(int rval, int tval, int DEBUG){
+  if (DEBUG){
+    Serial.print("rval ");
+    Serial.print(rval);
+    Serial.print("   gval");
+    Serial.print(tval);
+    Serial.print(" 1,2,3 if statement:");
+  }
+
+  if(rval && !tval){
+    return 1;
+  }
+  if(tval && !rval){
+    return 2;
+  } 
+  if (!rval && !tval){
+    return 3;
+  }
+  return 4;
+}
+
+
+int decideMode(int yval, int gval, int DEBUG){
+  if (DEBUG){
+    Serial.print("yval ");
+    Serial.print(yval);
+    Serial.print("   gval");
+    Serial.print(gval);
+    Serial.print(" 1,2,3 if statement:");
+  }
+
+  if(yval && !gval){ // add not the other
+    digitalWrite(yled,HIGH);
+    digitalWrite(gled, LOW);
+    //Serial.print("1 ");
+    return 1;
+  }
+  if(gval && !yval){
+    digitalWrite(yled, LOW);
+    digitalWrite(gled, HIGH);
+    //Serial.print("2 ");
+    return 2;
+  } 
+  if (!yval && !gval){
+    digitalWrite(yled, LOW);
+    digitalWrite(gled, LOW);
+    //Serial.print("3 ");
+    return 3;
+  }
+  digitalWrite(yled, LOW);
+  digitalWrite(gled, LOW);
+  return 4;
+}
+
+```
