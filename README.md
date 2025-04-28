@@ -125,7 +125,8 @@ One limitation is that this model only can tell whether something is recyclable
 or organic, it has no feature to distinguish trash.
 
 
-```
+arduino live
+```arduino
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Wire.h>
@@ -144,8 +145,8 @@ int in2 = 7;
 //int enB = 11;
 //int in3 = 10;
 //int in4 = 12;
-int R_SIG = 10;
-int T_SIG = 11;
+//int R_SIG = 10;
+//int T_SIG = 11;
 // Buffer for storing incoming serial data
 String inputString = "";
 boolean stringComplete = false;
@@ -157,14 +158,15 @@ L298N MOTORS(enA, in1, in2);
 int MODE = 3;        // Start in none mode by default
 int SPEED = 100;
 int MOVE_TIME = 20;
+int PROD_TIME = 500;
 void setup() {
   // put your setup code here, to run once:
   pinMode(yled, OUTPUT);
   pinMode(sy, INPUT);
   pinMode(gled, OUTPUT);
   pinMode(sg, INPUT);
-  pinMode(R_SIG, INPUT);
-  pinMode(T_SIG, INPUT);
+  //pinMode(R_SIG, INPUT);
+  //pinMode(T_SIG, INPUT);
   IrReceiver.begin(IR_RECEIVE_PIN, ENABLE_LED_FEEDBACK);
   Serial.begin(9600);
   while (!Serial) {
@@ -174,7 +176,7 @@ void setup() {
     // Reserve 200 bytes for the inputString
   inputString.reserve(200);
 }
-void loop() {
+void loop3() {
   // Process completed commands
   if (stringComplete) {
     // Remove newline and carriage return characters
@@ -211,11 +213,29 @@ void processCommand(String command) {
   Serial.println(command);
   
   // Process specific commands
-  if (command.equals("LED_ON")) {
-    Serial.println("LED turned ON");
+  if (command.equals("recycle")) {
+    Serial.println("recycle ON");
+    Serial.println("PI: FULL RECYCLE for 2 seconds");
+    MOTORS.setSpeed(SPEED); // full speed
+    MOTORS.forward();
+    delay(PROD_TIME);
+    MOTORS.stop();
+    delay(PROD_TIME*3);
+    MOTORS.backward();
+    delay(PROD_TIME);
+    MOTORS.stop();
   } 
-  else if (command.equals("LED_OFF")) {
-    Serial.println("LED turned OFF");
+  else if (command.equals("trash")) {
+    Serial.println("trash on");
+    Serial.println("PI: FULL TRASH for 2 seconds");
+    MOTORS.setSpeed(SPEED); // full speed
+    MOTORS.backward();
+    delay(PROD_TIME);
+    MOTORS.stop();
+    delay(PROD_TIME*3);
+    MOTORS.forward();
+    delay(PROD_TIME);
+    MOTORS.stop();
   }
   else if (command.equals("PING")) {
     Serial.println("PONG");
@@ -229,12 +249,12 @@ void processCommand(String command) {
   Serial.println("-----");
 }
 
-void loop2() {
+void loop() {
   // put your main code here, to run repeatedly:
   int yval = digitalRead(sy);
   int gval = digitalRead(sg);
-  int rval = digitalRead(R_SIG);
-  int tval = digitalRead(T_SIG);
+  //int rval = digitalRead(R_SIG);
+  //int tval = digitalRead(T_SIG);
   int newMode = decideMode(yval, gval, 0);
   if (newMode != MODE) {
     Serial.print("Change in mode to ");
@@ -243,30 +263,51 @@ void loop2() {
     return;
   }
   if (MODE == 1){
-    int modelOutput = inderence(rval, tval, 0);
-    if (modelOutput == 1) {
-      Serial.println("PI: FULL RECYCLE for 2 seconds");
-      if (MODE == 2) {
+    if (stringComplete) {
+      // Remove newline and carriage return characters
+      inputString.trim();
+      
+      // Process the command
+      processCommand(inputString);
+      
+      // Clear the string for new input
+      inputString = "";
+      stringComplete = false;
+    }
+    
+    // Check for incoming serial data
+    while (Serial.available()) {
+      // Get the new byte
+      char inChar = (char)Serial.read();
+      
+      // Add it to the inputString
+      inputString += inChar; 
+      
+      // If the incoming character is a newline, set a flag
+      // so the main loop can process the complete string
+      if (inChar == '\n') {
+        stringComplete = true;
+      }
+    }
+    /*
+    if (stringComplete){
+      Serial.println("SECOND STRING COMPLETE");
+      if (inputString.equals("recycle")){
+        Serial.println("PI: FULL RECYCLE for 2 seconds");
         MOTORS.setSpeed(SPEED); // full speed
         MOTORS.forward();
-        delay(MOVE_TIME);
+        delay(PROD_TIME);
         MOTORS.stop();
-      }
-    }
-    else if (modelOutput == 2) {
-      Serial.println("PI: FULL TRASH for 2 seconds");
-      if (MODE == 2) {
+      } else if (inputString.equals("trash")){
+        Serial.println("PI: FULL TRASH for 2 seconds");
         MOTORS.setSpeed(SPEED); // full speed
         MOTORS.backward();
-        delay(MOVE_TIME);
-        MOTORS.stop();
+        delay(PROD_TIME);
+        MOTORS.stop(); 
       }
-    } else if (modelOutput == 3){
-      Serial.println("NO OUTPUT PI");
-    } else if (modelOutput == 4){
-      Serial.println("MODEL ERROR");
+      
     }
-    return;
+    */
 
   }
 
@@ -352,5 +393,162 @@ int decideMode(int yval, int gval, int DEBUG){
   digitalWrite(gled, LOW);
   return 4;
 }
+
+```
+rpi4 
+
+```python
+#!/usr/bin/env python3
+"""
+live_trash_classifier_button.py
+-------------------------------
+OpenCV video preview + ImageNet inference on-demand:
+press the BUTTON (GPIO 17) to classify the current frame,
+press 'q' or Esc to quit.
+Sends "recycle" or "trash" over serial to an attached Arduino.
+"""
+
+# --- std-lib ---
+import sys
+import time
+import argparse
+from pathlib import Path
+from datetime import datetime
+
+# --- third-party ---
+import cv2
+import torch
+import serial
+from torchvision import transforms
+from torchvision.models.inception import inception_v3, Inception_V3_Weights
+from PIL import Image
+
+# --- GPIO setup ---
+import RPi.GPIO as GPIO
+
+BUTTON_PIN = 17  # using BCM numbering; change if you like
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+
+# --- Serial setup ---
+SERIAL_PORT = "/dev/ttyUSB0"   # adjust as needed
+BAUD_RATE    = 9600
+try:
+    ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+    # give Arduino a moment to reset
+    time.sleep(5)
+except serial.SerialException as e:
+    GPIO.cleanup()
+    sys.exit(f"Error: could not open serial port {SERIAL_PORT}: {e}")
+
+# ---------- model & labels ----------
+weights = Inception_V3_Weights.IMAGENET1K_V1
+IMNET_LABELS = weights.meta["categories"]
+
+model = inception_v3(weights=weights, aux_logits=True).eval().to("cpu")
+
+# ---------- preprocessing ----------
+preprocess = transforms.Compose([
+    transforms.Resize(299),
+    transforms.CenterCrop(299),
+    transforms.ToTensor(),
+    transforms.Normalize([0.485, 0.456, 0.406],
+                         [0.229, 0.224, 0.225]),
+])
+
+RECYCLABLE = {
+    'can','water bottle','pop bottle','soda bottle','wine bottle',
+    'envelope','mailbag','postbag','menu','comic book','crossword puzzle',
+    'cardigan','bath towel','wooden spoon','chain','cloak','bow',
+    'ruler','suit','sunglasses','pajama','pyjama',"pj's",'jammies'
+}
+
+@torch.inference_mode()
+def infer(pil_img: Image.Image, k: int) -> list[tuple[str, float]]:
+    tensor = preprocess(pil_img).unsqueeze(0)           # (1,3,299,299)
+    out    = model(tensor)
+
+    # handle different return types
+    if isinstance(out, (tuple, list)):
+        logits = out[0]
+    elif hasattr(out, "logits"):
+        logits = out.logits
+    else:
+        logits = out
+    logits = logits.squeeze(0)                          # (1000,)
+
+    probs  = torch.softmax(logits, dim=0)
+    top_p, top_i = probs.topk(k)
+    return [(IMNET_LABELS[i], float(p)) for i, p in zip(top_i.tolist(), top_p.tolist())]
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--cam", type=int, default=0, help="Camera index (default 0)")
+    ap.add_argument("--top-k", type=int, default=5, metavar="N",
+                    help="How many predictions to print (default 5)")
+    args = ap.parse_args()
+
+    cap = cv2.VideoCapture(args.cam)
+    if not cap.isOpened():
+        GPIO.cleanup()
+        sys.exit("Error: Could not open webcam")
+
+    print(f"Press the BUTTON on GPIO {BUTTON_PIN} to classify current frame.")
+    print("Press 'q' or Esc to quit.")
+
+    prev_button = False
+    latest_flag = 0
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                print("Error: Could not read frame")
+                break
+
+            cv2.imshow("Webcam", frame)
+
+            # --- check for quit ---
+            key = cv2.waitKey(1) & 0xFF
+            if key in (ord('q'), 27):
+                break
+
+            # --- poll button ---
+            curr = GPIO.input(BUTTON_PIN)
+            if curr and not prev_button:
+                # simple debounce
+                time.sleep(0.05)
+                if GPIO.input(BUTTON_PIN):
+                    # run inference
+                    img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    pil_img = Image.fromarray(img_rgb)
+                    top_k = infer(pil_img, max(1, args.top_k))
+
+                    ts = datetime.now().strftime("%H:%M:%S")
+                    print(f"\n[{ts}] Top-{len(top_k)} predictions:")
+                    for rank, (lbl, p) in enumerate(top_k, 1):
+                        print(f"  #{rank:<2} {lbl:<25} {p*100:5.1f}%")
+
+                    latest_flag = int(any(tok in top_k[0][0] for tok in RECYCLABLE))
+                    if latest_flag:
+                        decision = "recycle\n"
+                    else:
+                        decision = "trash\n"
+
+                    # send decision over serial
+                    ser.write(decision.encode('utf-8'))
+                    ser.flush()
+                    print(f"Sent over serial: {decision.strip()}")
+
+            prev_button = curr
+
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+        ser.close()
+        GPIO.cleanup()
+        sys.exit(latest_flag)
+
+if __name__ == "__main__":
+    main()
 
 ```
